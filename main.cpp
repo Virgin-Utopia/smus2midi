@@ -254,7 +254,7 @@ void parseNextChunk(char* buffer, uint32_t& offset, uint32_t dt, uint8_t velocit
 		}
 
 		uint32_t time = 0;
-
+		bool foundProgramChange = false;
 		std::vector<MidiEvent> events;
 
 		for (uint32_t pSEvent = offset + 8; pSEvent < offset + length; pSEvent += 2)
@@ -262,6 +262,7 @@ void parseNextChunk(char* buffer, uint32_t& offset, uint32_t dt, uint8_t velocit
 			currentProgramNumber = -1;
 			parseSEvent((unsigned char*)buffer, pSEvent, dt, time, velocity, events, currentProgramNumber);
 			if (currentProgramNumber >= 0) {
+				foundProgramChange = true;
 				if (explodingTracks) {
 					std::string trackName = songName + "/" + std::to_string(currentTrackNumber) + "/" + instruments[currentProgramNumber];
 
@@ -298,9 +299,48 @@ void parseNextChunk(char* buffer, uint32_t& offset, uint32_t dt, uint8_t velocit
 			}
 		}
 
+		AMidiTrack* pCurrentTrack = NULL;
+
+		if (!foundProgramChange) {
+			if (explodingTracks) {
+				std::string trackName = songName + "/" + std::to_string(currentTrackNumber) + "/" + "NONE";
+
+				CxxMidi::Track* pTrack = new CxxMidi::Track();
+
+				AMidiTrack targetTrack = AMidiTrack();
+				targetTrack.trackName = trackName;
+
+				if (!alreadyPresent<AMidiTrack>(lstTargetTracks, targetTrack)) {
+					std::cout << "Adding track '" << trackName << "'" << std::endl;
+
+					if (copyright.length() > 0) {
+						pTrack->push_back(setCopyright(copyright));
+					}
+					pTrack->push_back(setTrackName(trackName));
+					pTrack->push_back(setTempo(microsecsPerQuarterNote));
+
+					targetTrack.pTrack = pTrack;
+					targetTrack.trackNumber = currentTrackNumber;
+					targetTrack.programNumber = 0;
+					targetTrack.init = false;
+					targetTrack.time = 0;
+
+					if (!targetTrack.init) {
+						targetTrack.pTrack->push_back(CxxMidi::Event(0, // deltatime
+							CxxMidi::Message::ProgramChange, // message type
+							0)); // program number
+
+						targetTrack.init = true;
+					}
+					createIndex<AMidiTrack>(lstTargetTracks, targetTrack);
+
+					pCurrentTrack = &lstTargetTracks.at(getMidiTrackFromProgram(lstTargetTracks, currentTrackNumber, 0));
+				}
+			}
+		}
+
 		std::stable_sort(events.begin(), events.end(), MidiEventCompare);
 
-		AMidiTrack* pCurrentTrack = NULL;
 		time = 0;
 
 		for (std::vector<MidiEvent>::iterator it = events.begin(); it != events.end(); ++it)
